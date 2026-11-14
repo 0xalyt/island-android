@@ -31,7 +31,7 @@ jobs:
           test -f "$RUNNER_TEMP/island-project/island-android/gradlew"
           mkdir -p "$RUNNER_TEMP/island-project/island-android/app/src/test/java/com/pally/island"
           PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch" | cut -d ' ' -f1)
-          test "$PATCH_SHA" = "d08b1870d564496e5741c3f6aa7070b25f660453a2d95271b8ded80093638fa8"
+          test "$PATCH_SHA" = "20398e1f92f79472d56e811be394c38b4bb77db70a8a87e74f2ece68eebaad8f"
           cd "$RUNNER_TEMP/island-project"
           patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch"
           grep -q 'NotificationActionHitTest.actionIndexAt' island-android/app/src/main/java/com/pally/island/IslandOverlay.java
