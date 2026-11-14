@@ -19,6 +19,8 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - name: Check out private workflow patch
+        uses: actions/checkout@v4
       - name: Download and verify the private source archive
         run: |
           mkdir -p "$RUNNER_TEMP/island-download" "$RUNNER_TEMP/island-project"
@@ -68,6 +70,7 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$APK" AndroidManifest.xml > "$GITHUB_WORKSPACE/island-debug-apk/manifest-tree.txt"
           cp "$APK" "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk"
           sha256sum "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk" | tee "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk.sha256"
+          PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch" | cut -d ' ' -f1)
           {
             echo "base-source-archive-sha256=14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812"
             echo "hitbox-patch-sha256=$PATCH_SHA"
