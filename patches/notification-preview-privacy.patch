@@ -1,0 +1,178 @@
+--- a/island-android/app/src/main/java/com/pally/island/IslandListenerService.java
++++ b/island-android/app/src/main/java/com/pally/island/IslandListenerService.java
+@@ -98,10 +98,20 @@
+         Notification n = sbn.getNotification();
+         if (n == null) return;
+         String app = applicationLabel(sbn.getPackageName());
+-        String title = safeText(n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TITLE));
+-        CharSequence bodyValue = n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+-        if (TextUtils.isEmpty(bodyValue) && n.extras != null) bodyValue = n.extras.getCharSequence(Notification.EXTRA_TEXT);
+-        String body = safeText(bodyValue);
++        boolean previewsEnabled = getSharedPreferences(PREFS, MODE_PRIVATE)
++                .getBoolean("preview_text", false);
++        NotificationPreviewText previewText = NotificationPreviewText.capture(previewsEnabled,
++                new NotificationPreviewText.ExtraReader() {
++                    @Override public CharSequence title() {
++                        return n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TITLE);
++                    }
++                    @Override public CharSequence bigText() {
++                        return n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
++                    }
++                    @Override public CharSequence text() {
++                        return n.extras == null ? null : n.extras.getCharSequence(Notification.EXTRA_TEXT);
++                    }
++                });
+         ArrayList<ActionData> actions = new ArrayList<>();
+         if (n.actions != null) {
+             for (Notification.Action action : n.actions) {
+@@ -113,7 +123,8 @@
+                 if (!TextUtils.isEmpty(label)) actions.add(new ActionData(label, action.actionIntent));
+                 if (actions.size() == 2) break;
+             }
+         }
+-        currentNotification = new NotificationData(sbn.getKey(), app, title, body, n.contentIntent, actions);
++        currentNotification = new NotificationData(sbn.getKey(), app, previewText.title, previewText.body,
++                n.contentIntent, actions);
+         currentNotificationKey = sbn.getKey();
+         currentNotificationOngoing = sbn.isOngoing();
+         notificationExpiry = currentNotificationOngoing ? Long.MAX_VALUE : SystemClock.uptimeMillis() + 6500L;
+@@ -173,6 +184,10 @@
+ 
+     private void render() {
+         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
++        boolean showPreviews = prefs.getBoolean("preview_text", false);
++        if (!showPreviews && currentNotification != null) {
++            currentNotification = currentNotification.withPreviewText(false);
++        }
+         boolean enabled = prefs.getBoolean("island_enabled", false);
+         if (!enabled || !Settings.canDrawOverlays(this)) {
+             detachOverlay();
+@@ -190,7 +205,6 @@
+                 && SystemClock.uptimeMillis() >= notificationExpiry) visibleNotification = null;
+         MediaData visibleMedia = locked ? null : currentMedia;
+         BatteryData visibleBattery = locked ? new BatteryData(false, battery.percent) : battery;
+-        boolean showPreviews = prefs.getBoolean("preview_text", false);
+         overlay.setContent(visibleNotification, visibleMedia, visibleBattery, showPreviews);
+     }
+ 
+@@ -400,6 +414,13 @@
+             this.contentIntent = contentIntent;
+             this.actions = actions;
+         }
++
++        NotificationData withPreviewText(boolean enabled) {
++            NotificationPreviewText safeText = NotificationPreviewText.forDisplay(enabled,
++                    new NotificationPreviewText(title, body));
++            if (title.equals(safeText.title) && body.equals(safeText.body)) return this;
++            return new NotificationData(key, app, safeText.title, safeText.body, contentIntent, actions);
++        }
+     }
+ 
+     static final class ActionData {
+--- a/island-android/app/src/main/java/com/pally/island/MainActivity.java
++++ b/island-android/app/src/main/java/com/pally/island/MainActivity.java
+@@ -129,6 +129,7 @@
+         previewSwitch.setOnCheckedChangeListener((button, checked) -> {
+             getPreferences().edit().putBoolean("preview_text", checked).apply();
++            IslandListenerService.refreshFromActivity(this);
+         });
+         privacy.addView(previewSwitch);
+         LinearLayout.LayoutParams privacyParams = new LinearLayout.LayoutParams(-1, -2);
+--- /dev/null
++++ b/island-android/app/src/main/java/com/pally/island/NotificationPreviewText.java
+@@ -0,0 +1,43 @@
++package com.pally.island;
++
++/** Reads notification text only when previews are enabled and provides a redacted snapshot otherwise. */
++final class NotificationPreviewText {
++    interface ExtraReader {
++        CharSequence title();
++        CharSequence bigText();
++        CharSequence text();
++    }
++
++    static final NotificationPreviewText EMPTY = new NotificationPreviewText("", "");
++    final String title;
++    final String body;
++
++    NotificationPreviewText(String title, String body) {
++        this.title = title == null ? "" : title;
++        this.body = body == null ? "" : body;
++    }
++
++    static NotificationPreviewText capture(boolean enabled, ExtraReader reader) {
++        if (!enabled || reader == null) return EMPTY;
++        CharSequence title = reader.title();
++        CharSequence body = reader.bigText();
++        if (isEmpty(body)) body = reader.text();
++        return new NotificationPreviewText(normalize(title), normalize(body));
++    }
++
++    static NotificationPreviewText forDisplay(boolean enabled, NotificationPreviewText current) {
++        if (!enabled || current == null) return EMPTY;
++        return current;
++    }
++
++    private static boolean isEmpty(CharSequence value) {
++        return value == null || value.length() == 0;
++    }
++
++    private static String normalize(CharSequence value) {
++        if (value == null) return "";
++        String text = value.toString().replace('\n', ' ').replace('\r', ' ').trim();
++        if (text.length() > 120) text = text.substring(0, 119) + "…";
++        return text;
++    }
++}
+--- /dev/null
++++ b/island-android/app/src/test/java/com/pally/island/NotificationPreviewTextTest.java
+@@ -0,0 +1,49 @@
++package com.pally.island;
++
++import org.junit.Test;
++import static org.junit.Assert.assertEquals;
++
++public final class NotificationPreviewTextTest {
++    @Test public void disabledPreviewsDoNotInvokeExtraReaderAndReturnBlankText() {
++        final int[] reads = {0};
++        NotificationPreviewText result = NotificationPreviewText.capture(false,
++                new NotificationPreviewText.ExtraReader() {
++                    @Override public CharSequence title() { reads[0]++; return "secret title"; }
++                    @Override public CharSequence bigText() { reads[0]++; return "secret body"; }
++                    @Override public CharSequence text() { reads[0]++; return "fallback"; }
++                });
++        assertEquals(0, reads[0]);
++        assertEquals("", result.title);
++        assertEquals("", result.body);
++    }
++
++    @Test public void enabledPreviewsCaptureAndNormalizeText() {
++        final int[] reads = {0};
++        NotificationPreviewText result = NotificationPreviewText.capture(true,
++                new NotificationPreviewText.ExtraReader() {
++                    @Override public CharSequence title() { reads[0]++; return "  hello\nworld  "; }
++                    @Override public CharSequence bigText() { reads[0]++; return "full body"; }
++                    @Override public CharSequence text() { reads[0]++; return "fallback"; }
++                });
++        assertEquals(2, reads[0]);
++        assertEquals("hello world", result.title);
++        assertEquals("full body", result.body);
++    }
++
++    @Test public void enabledPreviewsUseNotificationTextAsBodyFallback() {
++        NotificationPreviewText result = NotificationPreviewText.capture(true,
++                new NotificationPreviewText.ExtraReader() {
++                    @Override public CharSequence title() { return "title"; }
++                    @Override public CharSequence bigText() { return ""; }
++                    @Override public CharSequence text() { return "short body"; }
++                });
++        assertEquals("short body", result.body);
++    }
++
++    @Test public void disablingPreviewsRedactsAnExistingSnapshot() {
++        NotificationPreviewText existing = new NotificationPreviewText("secret title", "secret body");
++        NotificationPreviewText cleared = NotificationPreviewText.forDisplay(false, existing);
++        assertEquals("", cleared.title);
++        assertEquals("", cleared.body);
++    }
++}
