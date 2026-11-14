@@ -1,0 +1,135 @@
+--- a/island-android/app/build.gradle.kts
++++ b/island-android/app/build.gradle.kts
+@@ -10,8 +10,8 @@
+         applicationId = "com.pally.island"
+         minSdk = 26
+         targetSdk = 35
+-        versionCode = 1
+-        versionName = "0.1.0"
++        versionCode = 2
++        versionName = "0.1.1"
+     }
+ 
+     compileOptions {
+@@ -19,3 +19,7 @@
+         targetCompatibility = JavaVersion.VERSION_17
+     }
+ }
++
++dependencies {
++    testImplementation("junit:junit:4.13.2")
++}
+--- a/island-android/app/src/main/java/com/pally/island/IslandOverlay.java
++++ b/island-android/app/src/main/java/com/pally/island/IslandOverlay.java
+@@ -185,12 +185,16 @@
+             return;
+         }
+         if (notification != null && notification.actions != null && !notification.actions.isEmpty() && y >= buttonY) {
+-            int count = Math.min(2, notification.actions.size());
+-            int half = (view == null ? dp(340) : view.getWidth()) / count;
+-            int index = Math.max(0, Math.min(count - 1, (int) (x / Math.max(1, half))));
+-            listener.runNotificationAction(notification.actions.get(index).intent);
+-            expandedByUser = false;
+-            animateTo(0f, false);
++            if (view == null) return;
++            int index = NotificationActionHitTest.actionIndexAt(
++                    x, y, view.getWidth(), view.getHeight(),
++                    context.getResources().getDisplayMetrics().density,
++                    notification.actions.size());
++            if (index >= 0) {
++                listener.runNotificationAction(notification.actions.get(index).intent);
++                expandedByUser = false;
++                animateTo(0f, false);
++            }
+             return;
+         }
+         if (notification != null && notification.contentIntent != null) {
+--- /dev/null
++++ b/island-android/app/src/main/java/com/pally/island/NotificationActionHitTest.java
+@@ -0,0 +1,35 @@
++package com.pally.island;
++
++/** Maps tap coordinates to the exact rectangular bounds used for the visible notification buttons. */
++final class NotificationActionHitTest {
++    private NotificationActionHitTest() { }
++
++    static int actionIndexAt(float x, float y, int viewWidth, int viewHeight,
++                             float density, int actionCount) {
++        if (!Float.isFinite(x) || !Float.isFinite(y) || !Float.isFinite(density)
++                || density <= 0f || viewWidth <= 0 || viewHeight <= 0 || actionCount <= 0) {
++            return -1;
++        }
++        int count = Math.min(2, actionCount);
++        float left = dp(18f, density);
++        float gap = dp(8f, density);
++        float usable = viewWidth - dp(36f, density);
++        float buttonWidth = (usable - (count - 1) * gap) / count;
++        float top = viewHeight - dp(42f, density);
++        float bottom = viewHeight - dp(12f, density);
++        if (buttonWidth <= 0f || bottom < top) return -1;
++
++        for (int index = 0; index < count; index++) {
++            float buttonLeft = left + index * (buttonWidth + gap);
++            float buttonRight = buttonLeft + buttonWidth;
++            if (x >= buttonLeft && x <= buttonRight && y >= top && y <= bottom) {
++                return index;
++            }
++        }
++        return -1;
++    }
++
++    private static int dp(float value, float density) {
++        return (int) (value * density + 0.5f);
++    }
++}
+--- /dev/null
++++ b/island-android/app/src/test/java/com/pally/island/NotificationActionHitTestTest.java
+@@ -0,0 +1,48 @@
++package com.pally.island;
++
++import org.junit.Test;
++
++import static org.junit.Assert.assertEquals;
++
++public final class NotificationActionHitTestTest {
++    @Test public void targetsOnlyTheVisibleButtonRectsAndLeavesTheGapInactive() {
++        int width = 340;
++        int height = 186;
++        float density = 1f;
++        assertEquals(0, NotificationActionHitTest.actionIndexAt(18, 144, width, height, density, 2));
++        assertEquals(0, NotificationActionHitTest.actionIndexAt(166, 174, width, height, density, 2));
++        assertEquals(1, NotificationActionHitTest.actionIndexAt(174, 144, width, height, density, 2));
++        assertEquals(1, NotificationActionHitTest.actionIndexAt(322, 174, width, height, density, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(170, 150, width, height, density, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(17, 150, width, height, density, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(323, 150, width, height, density, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(25, 143, width, height, density, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(25, 175, width, height, density, 2));
++    }
++
++    @Test public void rejectsTheFormerBroadHitBandAndClampedOutsideTap() {
++        // At this size the former code accepted y >= 132 and clamped any x to an action.
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(30, 133, 340, 186, 1f, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(330, 150, 340, 186, 1f, 2));
++    }
++
++    @Test public void singleActionUsesTheSingleDrawnButtonAndExtraActionsAreNotExposed() {
++        assertEquals(0, NotificationActionHitTest.actionIndexAt(300, 160, 340, 186, 1f, 1));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(170, 150, 340, 186, 1f, 1));
++        assertEquals(1, NotificationActionHitTest.actionIndexAt(180, 150, 340, 186, 1f, 4));
++    }
++
++    @Test public void scalesBoundsWithDisplayDensity() {
++        assertEquals(0, NotificationActionHitTest.actionIndexAt(40, 300, 680, 372, 2f, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(340, 300, 680, 372, 2f, 2));
++        assertEquals(1, NotificationActionHitTest.actionIndexAt(400, 300, 680, 372, 2f, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(400, 350, 680, 372, 2f, 2));
++    }
++
++    @Test public void rejectsInvalidInputs() {
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(1, 1, 0, 186, 1f, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(1, 1, 340, 186, 0f, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(Float.NaN, 1, 340, 186, 1f, 2));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(1, 1, 340, 186, 1f, 0));
++    }
++}
