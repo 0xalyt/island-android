@@ -1,0 +1,64 @@
+name: Build installable debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download and verify the private source archive
+        run: |
+          mkdir -p "$RUNNER_TEMP/island-download" "$RUNNER_TEMP/island-project"
+          gh release download source-v1 --repo "$GITHUB_REPOSITORY" --pattern island-android-source.zip --dir "$RUNNER_TEMP/island-download"
+          cd "$RUNNER_TEMP/island-download"
+          echo '14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812  island-android-source.zip' | sha256sum --check --status
+          unzip -q island-android-source.zip -d "$RUNNER_TEMP/island-project"
+          test -f "$RUNNER_TEMP/island-project/island-android/gradlew"
+          echo "Verified source archive SHA-256: 14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812"
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+      - name: Accept SDK licenses and install Android API 35
+        run: |
+          set +o pipefail
+          yes | sdkmanager --licenses >/dev/null
+          set -o pipefail
+          sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Run unit-test task and assemble debug APK
+        working-directory: ${{ runner.temp }}/island-project/island-android
+        run: |
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
+      - name: Verify APK signature and package metadata
+        working-directory: ${{ runner.temp }}/island-project/island-android
+        run: |
+          APK=app/build/outputs/apk/debug/app-debug.apk
+          test -s "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n 1
+          mkdir -p "$GITHUB_WORKSPACE/island-debug-apk"
+          cp "$APK" "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk"
+      - name: Upload installable debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: island-debug-apk
+          path: island-debug-apk/app-debug.apk
+          if-no-files-found: error
+          retention-days: 7
