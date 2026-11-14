@@ -32,11 +32,16 @@ jobs:
           mkdir -p "$RUNNER_TEMP/island-project/island-android/app/src/test/java/com/pally/island"
           PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch" | cut -d ' ' -f1)
           test "$PATCH_SHA" = "20398e1f92f79472d56e811be394c38b4bb77db70a8a87e74f2ece68eebaad8f"
+          STYLE_PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/api27-navigation-style.patch" | cut -d ' ' -f1)
+          test "$STYLE_PATCH_SHA" = "39e32c0e108c97deb8b057341c4635d4e9bb12b0dd90c2e5ba1225eca656086a"
           cd "$RUNNER_TEMP/island-project"
           patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch"
+          mkdir -p island-android/app/src/main/res/values-v27
+          patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/api27-navigation-style.patch"
           grep -q 'NotificationActionHitTest.actionIndexAt' island-android/app/src/main/java/com/pally/island/IslandOverlay.java
           echo "Verified source archive SHA-256: 14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812"
           echo "Applied notification hitbox patch SHA-256: $PATCH_SHA"
+          echo "Applied API 27 navigation style patch SHA-256: $STYLE_PATCH_SHA"
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -71,9 +76,11 @@ jobs:
           cp "$APK" "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk"
           sha256sum "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk" | tee "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk.sha256"
           PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch" | cut -d ' ' -f1)
+          STYLE_PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/api27-navigation-style.patch" | cut -d ' ' -f1)
           {
             echo "base-source-archive-sha256=14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812"
             echo "hitbox-patch-sha256=$PATCH_SHA"
+            echo "api27-navigation-style-patch-sha256=$STYLE_PATCH_SHA"
             echo "workflow-commit=$GITHUB_SHA"
             echo "workflow-ref=$GITHUB_REF"
           } > "$GITHUB_WORKSPACE/island-debug-apk/provenance.txt"
