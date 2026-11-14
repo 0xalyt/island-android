@@ -26,7 +26,6 @@
          if (n.actions != null) {
              for (Notification.Action action : n.actions) {
 @@ -113,7 +123,8 @@
-                 if (!TextUtils.isEmpty(label)) actions.add(new ActionData(label, action.actionIntent));
                  if (actions.size() == 2) break;
              }
          }
@@ -50,7 +49,7 @@
 @@ -190,7 +205,6 @@
                  && SystemClock.uptimeMillis() >= notificationExpiry) visibleNotification = null;
          MediaData visibleMedia = locked ? null : currentMedia;
-         BatteryData visibleBattery = locked ? new BatteryData(false, battery.percent) : battery;
+         BatteryData visibleBattery = locked ? new BatteryData(false, 0) : battery;
 -        boolean showPreviews = prefs.getBoolean("preview_text", false);
          overlay.setContent(visibleNotification, visibleMedia, visibleBattery, showPreviews);
      }
@@ -72,6 +71,7 @@
 --- a/island-android/app/src/main/java/com/pally/island/MainActivity.java
 +++ b/island-android/app/src/main/java/com/pally/island/MainActivity.java
 @@ -129,6 +129,7 @@
+         previewSwitch.setThumbTintList(ColorStateList.valueOf(MINT));
          previewSwitch.setOnCheckedChangeListener((button, checked) -> {
              getPreferences().edit().putBoolean("preview_text", checked).apply();
 +            IslandListenerService.refreshFromActivity(this);
