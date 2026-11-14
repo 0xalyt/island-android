@@ -27,7 +27,14 @@ jobs:
           echo '14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812  island-android-source.zip' | sha256sum --check --status
           unzip -q island-android-source.zip -d "$RUNNER_TEMP/island-project"
           test -f "$RUNNER_TEMP/island-project/island-android/gradlew"
+          mkdir -p "$RUNNER_TEMP/island-project/island-android/app/src/test/java/com/pally/island"
+          PATCH_SHA=$(sha256sum "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch" | cut -d ' ' -f1)
+          test "$PATCH_SHA" = "d08b1870d564496e5741c3f6aa7070b25f660453a2d95271b8ded80093638fa8"
+          cd "$RUNNER_TEMP/island-project"
+          patch --batch --forward -p1 < "$GITHUB_WORKSPACE/patches/island-hitbox-fix.patch"
+          grep -q 'NotificationActionHitTest.actionIndexAt' island-android/app/src/main/java/com/pally/island/IslandOverlay.java
           echo "Verified source archive SHA-256: 14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812"
+          echo "Applied notification hitbox patch SHA-256: $PATCH_SHA"
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -44,12 +51,12 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           set -o pipefail
           sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Run unit-test task and assemble debug APK
+      - name: Run unit tests, Android lint, and assemble debug APK
         working-directory: ${{ runner.temp }}/island-project/island-android
         run: |
           chmod +x ./gradlew
-          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:assembleDebug
-      - name: Verify APK signature and package metadata
+          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+      - name: Verify APK signature, metadata, and effective manifest
         working-directory: ${{ runner.temp }}/island-project/island-android
         run: |
           APK=app/build/outputs/apk/debug/app-debug.apk
@@ -57,11 +64,31 @@ jobs:
           "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/35.0.0/aapt" dump badging "$APK" | head -n 1
           mkdir -p "$GITHUB_WORKSPACE/island-debug-apk"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions "$APK" | tee "$GITHUB_WORKSPACE/island-debug-apk/permissions.txt"
+          "$ANDROID_HOME/build-tools/35.0.0/aapt" dump xmltree "$APK" AndroidManifest.xml > "$GITHUB_WORKSPACE/island-debug-apk/manifest-tree.txt"
           cp "$APK" "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk"
-      - name: Upload installable debug APK
+          sha256sum "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk" | tee "$GITHUB_WORKSPACE/island-debug-apk/app-debug.apk.sha256"
+          {
+            echo "base-source-archive-sha256=14486c32bfec312202e2e9ba2a33158941da0aa0ecd4b5ab7b569df2c4efe812"
+            echo "hitbox-patch-sha256=$PATCH_SHA"
+            echo "workflow-commit=$GITHUB_SHA"
+            echo "workflow-ref=$GITHUB_REF"
+          } > "$GITHUB_WORKSPACE/island-debug-apk/provenance.txt"
+      - name: Upload hitbox-fix debug APK and manifest evidence
         uses: actions/upload-artifact@v4
         with:
-          name: island-debug-apk
-          path: island-debug-apk/app-debug.apk
+          name: island-debug-apk-hitbox-fix
+          path: island-debug-apk/
           if-no-files-found: error
+          retention-days: 7
+      - name: Upload unit test and lint reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: island-hitbox-fix-test-reports
+          path: |
+            ${{ runner.temp }}/island-project/island-android/app/build/reports/tests/testDebugUnitTest/
+            ${{ runner.temp }}/island-project/island-android/app/build/reports/lint-results-debug.html
+            ${{ runner.temp }}/island-project/island-android/app/build/reports/lint-results-debug.xml
+          if-no-files-found: warn
           retention-days: 7
