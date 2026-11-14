@@ -84,7 +84,7 @@
 +}
 --- /dev/null
 +++ b/island-android/app/src/test/java/com/pally/island/NotificationActionHitTestTest.java
-@@ -0,0 +1,48 @@
+@@ -0,0 +1,49 @@
 +package com.pally.island;
 +
 +import org.junit.Test;
@@ -115,7 +115,8 @@
 +
 +    @Test public void singleActionUsesTheSingleDrawnButtonAndExtraActionsAreNotExposed() {
 +        assertEquals(0, NotificationActionHitTest.actionIndexAt(300, 160, 340, 186, 1f, 1));
-+        assertEquals(-1, NotificationActionHitTest.actionIndexAt(170, 150, 340, 186, 1f, 1));
++        assertEquals(0, NotificationActionHitTest.actionIndexAt(170, 150, 340, 186, 1f, 1));
++        assertEquals(-1, NotificationActionHitTest.actionIndexAt(17, 150, 340, 186, 1f, 1));
 +        assertEquals(1, NotificationActionHitTest.actionIndexAt(180, 150, 340, 186, 1f, 4));
 +    }
 +
